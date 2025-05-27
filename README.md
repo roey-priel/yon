@@ -20,7 +20,11 @@ A full-stack application for managing long-running jobs, built with React fronte
 - Node.js 16 or higher
 - npm or yarn
 
-## Backend Setup
+## Running the Application
+
+The application consists of two parts that need to run simultaneously:
+
+### Backend (Flask Server)
 
 1. Create and activate a Python virtual environment:
 ```bash
@@ -40,29 +44,34 @@ python main.py
 
 The backend server will start on `http://localhost:5000`
 
-## Frontend Setup
+### Frontend (React App)
 
-1. Navigate to the frontend directory:
+1. Open a new terminal window (keep the backend running in the first terminal)
+
+2. Navigate to the frontend directory:
 ```bash
 cd job-manager
 ```
 
-2. Install dependencies:
+3. Install dependencies:
 ```bash
 npm install
 ```
 
-3. Start the development server:
+4. Start the development server:
 ```bash
 npm start
 ```
 
-4. In a separate terminal, start the CSS watcher for Tailwind:
+5. In a third terminal window, start the CSS watcher for Tailwind:
 ```bash
+cd job-manager
 npm run dev:css
 ```
 
 The frontend will be available at `http://localhost:3000`
+
+> **Note**: You need to have both the backend (Flask) and frontend (React) servers running simultaneously for the application to work properly. The React app makes API calls to the Flask backend.
 
 ## API Endpoints
 
@@ -106,3 +115,15 @@ npm run build
 ```
 
 This will create optimized production files in the `build` directory.
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
