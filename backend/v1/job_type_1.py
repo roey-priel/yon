@@ -1,12 +1,13 @@
-from flask import Flask, request, jsonify
+from flask import request, jsonify
 import threading
 import time
 import uuid
 from datetime import datetime
-from enum import Enum
 import os
-from flask_cors import CORS
+from enum import Enum
 from marshmallow import Schema, fields, ValidationError
+from ..app import app
+from utils.database import update_job, get_job, store_job, delete_job_from_db, list_all_jobs
 
 # Configuration
 FIREBASE = os.getenv('FIREBASE', 'False').lower() == 'true'
@@ -22,14 +23,6 @@ if FIREBASE:
     except Exception as e:
         print(f"Failed to initialize Firebase: {e}")
         FIREBASE = False
-
-app = Flask(__name__)
-CORS(app)
-
-# Initialize in-memory database
-in_memory_db = {
-    'jobs': {}  # Dictionary to store jobs
-}
 
 class JobStatus(Enum):
     PENDING = "pending"
@@ -63,64 +56,6 @@ def long_running_job(input1, input2):
         "processed_input2": input2,
         "combined_result": f"{input1} + {input2}"
     }
-
-def update_job(job_id, updates):
-    """Update job in the active database"""
-    try:
-        if FIREBASE:
-            job_ref = db.collection('jobs').document(job_id)
-            job_ref.update(updates)
-        else:
-            if job_id in in_memory_db['jobs']:
-                in_memory_db['jobs'][job_id].update(updates)
-    except Exception as e:
-        print(f"Error updating job {job_id}: {e}")
-
-def get_job(job_id):
-    """Get job from the active database"""
-    try:
-        if FIREBASE:
-            job_ref = db.collection('jobs').document(job_id)
-            job_doc = job_ref.get()
-            return job_doc.to_dict() if job_doc.exists else None
-        else:
-            return in_memory_db['jobs'].get(job_id)
-    except Exception as e:
-        print(f"Error getting job {job_id}: {e}")
-        return None
-
-def store_job(job_id, job_data):
-    """Store job in the active database"""
-    try:
-        if FIREBASE:
-            db.collection('jobs').document(job_id).set(job_data)
-        else:
-            in_memory_db['jobs'][job_id] = job_data
-    except Exception as e:
-        print(f"Error storing job {job_id}: {e}")
-
-def delete_job_from_db(job_id):
-    """Delete job from the active database"""
-    try:
-        if FIREBASE:
-            db.collection('jobs').document(job_id).delete()
-        else:
-            if job_id in in_memory_db['jobs']:
-                del in_memory_db['jobs'][job_id]
-    except Exception as e:
-        print(f"Error deleting job {job_id}: {e}")
-
-def list_all_jobs():
-    """List all jobs from the active database"""
-    try:
-        if FIREBASE:
-            jobs_ref = db.collection('jobs')
-            return [doc.to_dict() for doc in jobs_ref.stream()]
-        else:
-            return list(in_memory_db['jobs'].values())
-    except Exception as e:
-        print(f"Error listing jobs: {e}")
-        return []
 
 def execute_job(job_id):
     """Execute job in background thread"""
@@ -179,7 +114,7 @@ def validate_job_inputs(data):
         
         return False, "; ".join(error_messages), None
 
-@app.route('/jobs', methods=['POST'])
+@app.route('/job1', methods=['POST'])
 def create_job():
     """Create a new long-running job"""
     # Validate request content type
@@ -199,6 +134,7 @@ def create_job():
     job_data = {
         "job_id": job_id,
         "run_id": run_id,
+        "type": "job1",
         "status": JobStatus.PENDING.value,
         "input_data": validated_data,  # Use validated data
         "created_at": datetime.utcnow().isoformat(),
@@ -226,12 +162,12 @@ def create_job():
     except Exception as e:
         return jsonify({"error": f"Failed to create job: {str(e)}"}), 500
 
-@app.route('/jobs/<job_id>', methods=['GET'])
+@app.route('/job1/<job_id>', methods=['GET'])
 def get_job_status(job_id):
     """Get job status and details"""
     try:
         job = get_job(job_id)
-        if not job:
+        if not job or job.get('type') != 'job1':
             return jsonify({"error": "Job not found"}), 404
         
         # Calculate runtime if job has started
@@ -244,6 +180,7 @@ def get_job_status(job_id):
         response = {
             "job_id": job["job_id"],
             "run_id": job["run_id"],
+            "type": job["type"],
             "status": job["status"],
             "input_data": job["input_data"],
             "created_at": job["created_at"],
@@ -259,11 +196,11 @@ def get_job_status(job_id):
     except Exception as e:
         return jsonify({"error": f"Failed to get job: {str(e)}"}), 500
 
-@app.route('/jobs', methods=['GET'])
+@app.route('/job1', methods=['GET'])
 def list_jobs():
     """List all jobs with optional filtering"""
     try:
-        jobs = list_all_jobs()
+        jobs = [job for job in list_all_jobs() if job.get('type') == 'job1']
         
         # Optional filtering by status
         status_filter = request.args.get('status')
@@ -282,11 +219,12 @@ def list_jobs():
     except Exception as e:
         return jsonify({"error": f"Failed to list jobs: {str(e)}"}), 500
 
-@app.route('/jobs/<job_id>', methods=['DELETE'])
+@app.route('/job1/<job_id>', methods=['DELETE'])
 def delete_job(job_id):
     """Delete a job"""
     try:
-        if not get_job(job_id):
+        job = get_job(job_id)
+        if not job or job.get('type') != 'job1':
             return jsonify({"error": "Job not found"}), 404
             
         delete_job_from_db(job_id)
