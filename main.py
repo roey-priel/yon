@@ -4,10 +4,24 @@ import time
 import uuid
 from datetime import datetime
 from enum import Enum
-# import firebase_admin
+import os
 from flask_cors import CORS
-# from firebase_admin import credentials, firestore
 from marshmallow import Schema, fields, ValidationError
+
+# Configuration
+FIREBASE = os.getenv('FIREBASE', 'False').lower() == 'true'
+
+# Initialize Firebase if enabled
+if FIREBASE:
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    try:
+        cred = credentials.ApplicationDefault()
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+    except Exception as e:
+        print(f"Failed to initialize Firebase: {e}")
+        FIREBASE = False
 
 app = Flask(__name__)
 CORS(app)
@@ -16,11 +30,6 @@ CORS(app)
 in_memory_db = {
     'jobs': {}  # Dictionary to store jobs
 }
-
-# Comment out Firebase initialization
-# cred = credentials.ApplicationDefault()
-# firebase_admin.initialize_app(cred)
-# db = firestore.client()
 
 class JobStatus(Enum):
     PENDING = "pending"
@@ -55,27 +64,76 @@ def long_running_job(input1, input2):
         "combined_result": f"{input1} + {input2}"
     }
 
-def update_job_in_memory(job_id, updates):
-    """Update job in in-memory database"""
+def update_job(job_id, updates):
+    """Update job in the active database"""
     try:
-        if job_id in in_memory_db['jobs']:
-            in_memory_db['jobs'][job_id].update(updates)
+        if FIREBASE:
+            job_ref = db.collection('jobs').document(job_id)
+            job_ref.update(updates)
+        else:
+            if job_id in in_memory_db['jobs']:
+                in_memory_db['jobs'][job_id].update(updates)
     except Exception as e:
-        print(f"Error updating job {job_id} in memory: {e}")
+        print(f"Error updating job {job_id}: {e}")
+
+def get_job(job_id):
+    """Get job from the active database"""
+    try:
+        if FIREBASE:
+            job_ref = db.collection('jobs').document(job_id)
+            job_doc = job_ref.get()
+            return job_doc.to_dict() if job_doc.exists else None
+        else:
+            return in_memory_db['jobs'].get(job_id)
+    except Exception as e:
+        print(f"Error getting job {job_id}: {e}")
+        return None
+
+def store_job(job_id, job_data):
+    """Store job in the active database"""
+    try:
+        if FIREBASE:
+            db.collection('jobs').document(job_id).set(job_data)
+        else:
+            in_memory_db['jobs'][job_id] = job_data
+    except Exception as e:
+        print(f"Error storing job {job_id}: {e}")
+
+def delete_job_from_db(job_id):
+    """Delete job from the active database"""
+    try:
+        if FIREBASE:
+            db.collection('jobs').document(job_id).delete()
+        else:
+            if job_id in in_memory_db['jobs']:
+                del in_memory_db['jobs'][job_id]
+    except Exception as e:
+        print(f"Error deleting job {job_id}: {e}")
+
+def list_all_jobs():
+    """List all jobs from the active database"""
+    try:
+        if FIREBASE:
+            jobs_ref = db.collection('jobs')
+            return [doc.to_dict() for doc in jobs_ref.stream()]
+        else:
+            return list(in_memory_db['jobs'].values())
+    except Exception as e:
+        print(f"Error listing jobs: {e}")
+        return []
 
 def execute_job(job_id):
     """Execute job in background thread"""
     try:
-        # Get job from memory
-        if job_id not in in_memory_db['jobs']:
-            print(f"Job {job_id} not found in memory")
+        # Get job from database
+        job_data = get_job(job_id)
+        if not job_data:
+            print(f"Job {job_id} not found")
             return
             
-        job_data = in_memory_db['jobs'][job_id]
-        
         # Update status to running
         started_at = datetime.utcnow().isoformat()
-        update_job_in_memory(job_id, {
+        update_job(job_id, {
             "status": JobStatus.RUNNING.value,
             "started_at": started_at
         })
@@ -88,7 +146,7 @@ def execute_job(job_id):
         
         # Update with completion
         completed_at = datetime.utcnow().isoformat()
-        update_job_in_memory(job_id, {
+        update_job(job_id, {
             "status": JobStatus.COMPLETED.value,
             "result": result,
             "completed_at": completed_at
@@ -97,7 +155,7 @@ def execute_job(job_id):
     except Exception as e:
         # Update with error
         completed_at = datetime.utcnow().isoformat()
-        update_job_in_memory(job_id, {
+        update_job(job_id, {
             "status": JobStatus.FAILED.value,
             "error": str(e),
             "completed_at": completed_at
@@ -151,8 +209,8 @@ def create_job():
     }
     
     try:
-        # Store job in memory
-        in_memory_db['jobs'][job_id] = job_data
+        # Store job in database
+        store_job(job_id, job_data)
         
         # Start job in background thread
         thread = threading.Thread(target=execute_job, args=(job_id,))
@@ -172,10 +230,9 @@ def create_job():
 def get_job_status(job_id):
     """Get job status and details"""
     try:
-        if job_id not in in_memory_db['jobs']:
+        job = get_job(job_id)
+        if not job:
             return jsonify({"error": "Job not found"}), 404
-        
-        job = in_memory_db['jobs'][job_id]
         
         # Calculate runtime if job has started
         runtime = None
@@ -206,7 +263,7 @@ def get_job_status(job_id):
 def list_jobs():
     """List all jobs with optional filtering"""
     try:
-        jobs = list(in_memory_db['jobs'].values())
+        jobs = list_all_jobs()
         
         # Optional filtering by status
         status_filter = request.args.get('status')
@@ -229,10 +286,10 @@ def list_jobs():
 def delete_job(job_id):
     """Delete a job"""
     try:
-        if job_id not in in_memory_db['jobs']:
+        if not get_job(job_id):
             return jsonify({"error": "Job not found"}), 404
             
-        del in_memory_db['jobs'][job_id]
+        delete_job_from_db(job_id)
         return jsonify({"message": "Job deleted successfully"}), 200
         
     except Exception as e:
@@ -241,7 +298,11 @@ def delete_job(job_id):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "database": "firebase" if FIREBASE else "in-memory"
+    })
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5001)
