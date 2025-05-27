@@ -1,92 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Clock, CheckCircle, XCircle, Loader, Trash2, Zap, Activity, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Play, Clock, CheckCircle, XCircle, Loader, Trash2, Zap, Activity, TrendingUp, AlertTriangle, Globe, Link } from 'lucide-react';
 
-// API functions (replace with your actual backend)
+// API functions
 const api = {
-  createJob: async (inputData) => {
-    await new Promise(resolve => setTimeout(resolve, 500));
+  createJob: async (jobType, inputData) => {
+    const response = await fetch(`http://localhost:5001/${jobType}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(inputData),
+    });
     
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const runId = `run_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create job');
+    }
     
-    const job = {
-      job_id: jobId,
-      run_id: runId,
-      status: 'pending',
-      input_data: inputData,
-      created_at: new Date().toISOString(),
-      started_at: null,
-      completed_at: null,
-      result: null,
-      error: null
-    };
-    
-    // Store in localStorage (simulating Firebase)
-    const jobs = JSON.parse(localStorage.getItem('jobs') || '{}');
-    jobs[jobId] = job;
-    localStorage.setItem('jobs', JSON.stringify(jobs));
-    
-    // Start mock job execution
-    setTimeout(() => api.executeJob(jobId), 1000);
-    
-    return { job_id: jobId };
+    return response.json();
   },
   
-  executeJob: async (jobId) => {
-    const jobs = JSON.parse(localStorage.getItem('jobs') || '{}');
-    const job = jobs[jobId];
-    
-    if (!job) return;
-    
-    // Update to running
-    job.status = 'running';
-    job.started_at = new Date().toISOString();
-    jobs[jobId] = job;
-    localStorage.setItem('jobs', JSON.stringify(jobs));
-    
-    // Simulate job execution (3-8 seconds)
-    const executionTime = 3000 + Math.random() * 5000;
-    
-    setTimeout(() => {
-      // Simulate 85% success rate
-      const success = Math.random() > 0.15;
-      
-      if (success) {
-        job.status = 'completed';
-        job.result = {
-          message: 'Job completed successfully',
-          processed_input1: job.input_data.input1,
-          processed_input2: job.input_data.input2,
-          combined_result: `${job.input_data.input1} + ${job.input_data.input2}`,
-          computation_time: executionTime
-        };
-      } else {
-        job.status = 'failed';
-        job.error = 'Network timeout during processing';
-      }
-      
-      job.completed_at = new Date().toISOString();
-      jobs[jobId] = job;
-      localStorage.setItem('jobs', JSON.stringify(jobs));
-    }, executionTime);
+  listJobs: async (jobType) => {
+    const response = await fetch(`http://localhost:5001/${jobType}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch jobs');
+    }
+    return response.json();
   },
   
-  listJobs: async () => {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const jobs = JSON.parse(localStorage.getItem('jobs') || '{}');
-    return Object.values(jobs).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  },
-  
-  deleteJob: async (jobId) => {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const jobs = JSON.parse(localStorage.getItem('jobs') || '{}');
-    delete jobs[jobId];
-    localStorage.setItem('jobs', JSON.stringify(jobs));
+  deleteJob: async (jobType, jobId) => {
+    const response = await fetch(`http://localhost:5001/${jobType}/${jobId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to delete job');
+    }
   }
 };
 
-// Validation function
-const validateInputs = (input1, input2) => {
+// Validation functions
+const validateJob1Inputs = (input1, input2) => {
   const errors = {};
   
   if (!input1 || input1.trim().length === 0) {
@@ -95,6 +48,33 @@ const validateInputs = (input1, input2) => {
   
   if (input2 === '' || input2 === null || input2 === undefined) {
     errors.input2 = 'input2 is required';
+  }
+  
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors
+  };
+};
+
+const validateJob2Inputs = (url, maxRetries, timeout) => {
+  const errors = {};
+  
+  if (!url) {
+    errors.url = 'URL is required';
+  } else if (!url.match(/^https?:\/\/.+/)) {
+    errors.url = 'URL must start with http:// or https://';
+  }
+  
+  if (maxRetries === '' || maxRetries === null || maxRetries === undefined) {
+    errors.maxRetries = 'Max retries is required';
+  } else if (isNaN(maxRetries) || maxRetries < 0 || maxRetries > 5) {
+    errors.maxRetries = 'Max retries must be between 0 and 5';
+  }
+  
+  if (timeout === '' || timeout === null || timeout === undefined) {
+    errors.timeout = 'Timeout is required';
+  } else if (isNaN(timeout) || timeout < 1 || timeout > 300) {
+    errors.timeout = 'Timeout must be between 1 and 300 seconds';
   }
   
   return {
@@ -158,17 +138,61 @@ const JobCard = ({ job, onDelete }) => {
     });
   };
 
+  const renderInputData = () => {
+    if (job.type === 'job1') {
+      return (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="text-xs text-gray-500">input1:</span>
+            <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
+              "{job.input_data.input1}"
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-gray-500">input2:</span>
+            <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
+              {JSON.stringify(job.input_data.input2)}
+            </div>
+          </div>
+        </div>
+      );
+    } else {
+      return (
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <span className="text-xs text-gray-500">url:</span>
+            <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
+              {job.input_data.url}
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-gray-500">max_retries:</span>
+            <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
+              {job.input_data.max_retries}
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-gray-500">timeout:</span>
+            <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
+              {job.input_data.timeout}s
+            </div>
+          </div>
+        </div>
+      );
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-200 overflow-hidden">
       <div className="p-6">
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <Zap className="w-5 h-5 text-white" />
+              {job.type === 'job1' ? <Zap className="w-5 h-5 text-white" /> : <Globe className="w-5 h-5 text-white" />}
             </div>
             <div>
               <h3 className="font-semibold text-gray-900">
-                Job #{job.job_id.split('_')[1].slice(0, 8)}
+                {job.type === 'job1' ? 'Basic Job' : 'URL Job'} #{job.job_id.split('-')[0]}
               </h3>
               <p className="text-sm text-gray-500">{formatDate(job.created_at)}</p>
             </div>
@@ -187,20 +211,7 @@ const JobCard = ({ job, onDelete }) => {
         <div className="space-y-3">
           <div className="bg-gray-50 rounded-lg p-3">
             <div className="text-xs font-medium text-gray-600 mb-2">INPUT DATA</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <span className="text-xs text-gray-500">input1:</span>
-                <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
-                  "{job.input_data.input1}"
-                </div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">input2:</span>
-                <div className="font-mono text-sm text-gray-900 bg-white px-2 py-1 rounded border">
-                  {JSON.stringify(job.input_data.input2)}
-                </div>
-              </div>
-            </div>
+            {renderInputData()}
           </div>
           
           {getRuntime() && (
@@ -215,7 +226,10 @@ const JobCard = ({ job, onDelete }) => {
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
               <div className="text-xs font-medium text-emerald-700 mb-2">RESULT</div>
               <div className="font-mono text-sm text-emerald-800">
-                {job.result.combined_result}
+                {job.type === 'job1' 
+                  ? job.result.combined_result
+                  : `Processed ${job.result.processed_url} with ${job.result.attempts} attempts`
+                }
               </div>
             </div>
           )}
@@ -255,8 +269,17 @@ const StatCard = ({ icon: Icon, label, value, color, trend }) => (
 );
 
 export default function AsyncJobManager() {
+  const [selectedJobType, setSelectedJobType] = useState('job1');
+  
+  // Job Type 1 inputs
   const [input1, setInput1] = useState('');
   const [input2, setInput2] = useState('');
+  
+  // Job Type 2 inputs
+  const [url, setUrl] = useState('');
+  const [maxRetries, setMaxRetries] = useState('3');
+  const [timeout, setTimeout] = useState('30');
+  
   const [jobs, setJobs] = useState([]);
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -264,8 +287,12 @@ export default function AsyncJobManager() {
 
   const loadJobs = async () => {
     try {
-      const jobList = await api.listJobs();
-      setJobs(jobList);
+      const job1List = await api.listJobs('job1');
+      const job2List = await api.listJobs('job2');
+      const allJobs = [...job1List, ...job2List].sort((a, b) => 
+        new Date(b.created_at) - new Date(a.created_at)
+      );
+      setJobs(allJobs);
       setLastUpdate(new Date());
     } catch (error) {
       console.error('Failed to load jobs:', error);
@@ -281,8 +308,24 @@ export default function AsyncJobManager() {
   }, []);
 
   const handleSubmit = async () => {
-    // Validate inputs
-    const validation = validateInputs(input1, input2);
+    let validation;
+    let inputData;
+    
+    if (selectedJobType === 'job1') {
+      validation = validateJob1Inputs(input1, input2);
+      inputData = {
+        input1: input1.trim(),
+        input2: input2
+      };
+    } else {
+      validation = validateJob2Inputs(url, parseInt(maxRetries), parseInt(timeout));
+      inputData = {
+        url: url.trim(),
+        max_retries: parseInt(maxRetries),
+        timeout: parseInt(timeout)
+      };
+    }
+    
     if (!validation.isValid) {
       setErrors(validation.errors);
       return;
@@ -292,20 +335,23 @@ export default function AsyncJobManager() {
     setIsSubmitting(true);
     
     try {
-      await api.createJob({
-        input1: input1.trim(),
-        input2: input2
-      });
+      await api.createJob(selectedJobType, inputData);
       
       // Clear form
-      setInput1('');
-      setInput2('');
+      if (selectedJobType === 'job1') {
+        setInput1('');
+        setInput2('');
+      } else {
+        setUrl('');
+        setMaxRetries('3');
+        setTimeout('30');
+      }
       
       // Refresh job list
       setTimeout(loadJobs, 500);
       
     } catch (error) {
-      setErrors({ submit: 'Failed to create job. Please try again.' });
+      setErrors({ submit: error.message || 'Failed to create job. Please try again.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -313,16 +359,14 @@ export default function AsyncJobManager() {
 
   const handleDelete = async (jobId) => {
     try {
-      await api.deleteJob(jobId);
-      await loadJobs();
+      const job = jobs.find(j => j.job_id === jobId);
+      if (job) {
+        await api.deleteJob(job.type, jobId);
+        await loadJobs();
+      }
     } catch (error) {
       console.error('Failed to delete job:', error);
     }
-  };
-
-  const clearAllJobs = () => {
-    localStorage.removeItem('jobs');
-    setJobs([]);
   };
 
   const stats = {
@@ -353,14 +397,6 @@ export default function AsyncJobManager() {
               <div className="text-sm text-gray-500">
                 Last updated: {lastUpdate.toLocaleTimeString()}
               </div>
-              {jobs.length > 0 && (
-                <button
-                  onClick={clearAllJobs}
-                  className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  Clear All
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -398,57 +434,153 @@ export default function AsyncJobManager() {
         
         {/* Create Job Form */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 mb-8">
-          <div className="flex items-center space-x-3 mb-6">
-            <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
-              <Play className="w-4 h-4 text-white" />
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
+                <Play className="w-4 h-4 text-white" />
+              </div>
+              <h2 className="text-xl font-semibold text-gray-900">Create New Job</h2>
             </div>
-            <h2 className="text-xl font-semibold text-gray-900">Create New Job</h2>
+            
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setSelectedJobType('job1')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  selectedJobType === 'job1'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                Basic Job
+              </button>
+              <button
+                onClick={() => setSelectedJobType('job2')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  selectedJobType === 'job2'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                URL Job
+              </button>
+            </div>
           </div>
           
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Input 1 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={input1}
-                  onChange={(e) => setInput1(e.target.value)}
-                  className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                    errors.input1 ? 'border-red-300 bg-red-50' : 'border-gray-200'
-                  }`}
-                  placeholder="Enter a string value..."
-                />
-                {errors.input1 && (
-                  <p className="text-red-500 text-sm mt-2 flex items-center">
-                    <AlertTriangle className="w-4 h-4 mr-1" />
-                    {errors.input1}
-                  </p>
-                )}
+            {selectedJobType === 'job1' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Input 1 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={input1}
+                    onChange={(e) => setInput1(e.target.value)}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                      errors.input1 ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                    }`}
+                    placeholder="Enter a string value..."
+                  />
+                  {errors.input1 && (
+                    <p className="text-red-500 text-sm mt-2 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-1" />
+                      {errors.input1}
+                    </p>
+                  )}
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Input 2 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={input2}
+                    onChange={(e) => setInput2(e.target.value)}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                      errors.input2 ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                    }`}
+                    placeholder="Enter any value..."
+                  />
+                  {errors.input2 && (
+                    <p className="text-red-500 text-sm mt-2 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-1" />
+                      {errors.input2}
+                    </p>
+                  )}
+                </div>
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Input 2 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={input2}
-                  onChange={(e) => setInput2(e.target.value)}
-                  className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
-                    errors.input2 ? 'border-red-300 bg-red-50' : 'border-gray-200'
-                  }`}
-                  placeholder="Enter any value..."
-                />
-                {errors.input2 && (
-                  <p className="text-red-500 text-sm mt-2 flex items-center">
-                    <AlertTriangle className="w-4 h-4 mr-1" />
-                    {errors.input2}
-                  </p>
-                )}
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    URL <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                      errors.url ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                    }`}
+                    placeholder="https://example.com"
+                  />
+                  {errors.url && (
+                    <p className="text-red-500 text-sm mt-2 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-1" />
+                      {errors.url}
+                    </p>
+                  )}
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Max Retries <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="5"
+                    value={maxRetries}
+                    onChange={(e) => setMaxRetries(e.target.value)}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                      errors.maxRetries ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                    }`}
+                    placeholder="0-5"
+                  />
+                  {errors.maxRetries && (
+                    <p className="text-red-500 text-sm mt-2 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-1" />
+                      {errors.maxRetries}
+                    </p>
+                  )}
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Timeout (seconds) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="300"
+                    value={timeout}
+                    onChange={(e) => setTimeout(e.target.value)}
+                    className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                      errors.timeout ? 'border-red-300 bg-red-50' : 'border-gray-200'
+                    }`}
+                    placeholder="1-300"
+                  />
+                  {errors.timeout && (
+                    <p className="text-red-500 text-sm mt-2 flex items-center">
+                      <AlertTriangle className="w-4 h-4 mr-1" />
+                      {errors.timeout}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
             
             {errors.submit && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -472,7 +604,7 @@ export default function AsyncJobManager() {
               ) : (
                 <>
                   <Play className="w-5 h-5" />
-                  <span className="font-medium">Create Job</span>
+                  <span className="font-medium">Create {selectedJobType === 'job1' ? 'Basic' : 'URL'} Job</span>
                 </>
               )}
             </button>
@@ -516,4 +648,4 @@ export default function AsyncJobManager() {
       </div>
     </div>
   );
-}
+} 
