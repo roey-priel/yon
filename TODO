@@ -1,0 +1,7 @@
+- Firebase ADC
+- negative runtime while job is processing
+- replace `long_running_job()` with real python jobs
+    - Update validation schemas accordingly (eg `JobInputSchema()`)
+    - Ask cursor to update the frontend accordingly
+- add optional "name" to job request body
+- update routes to `v1/job/...` etc
