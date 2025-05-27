@@ -153,7 +153,7 @@ def create_job():
             "message": "Job created successfully",
             "input_data": validated_data
         }), 202
-        
+
     except Exception as e:
         return jsonify({"error": f"Failed to create job: {str(e)}"}), 500
 
