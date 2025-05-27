@@ -1,12 +1,14 @@
-from flask import request, jsonify
+from flask import Blueprint, request, jsonify
 import threading
 import time
 import uuid
 from datetime import datetime
 from enum import Enum
 from marshmallow import Schema, fields, ValidationError
-from ..app import app
-from utils.database import update_job, get_job, store_job, delete_job_from_db, list_all_jobs
+from ..utils.database import update_job, get_job, store_job, delete_job_from_db, list_all_jobs
+
+# Create blueprint
+bp = Blueprint('job2', __name__, url_prefix='/job2')
 
 class JobStatus(Enum):
     PENDING = "pending"
@@ -107,7 +109,7 @@ def validate_job_inputs(data):
         
         return False, "; ".join(error_messages), None
 
-@app.route('/job2', methods=['POST'])
+@bp.route('', methods=['POST'])
 def create_job():
     """Create a new long-running job"""
     # Validate request content type
@@ -155,7 +157,7 @@ def create_job():
     except Exception as e:
         return jsonify({"error": f"Failed to create job: {str(e)}"}), 500
 
-@app.route('/job2/<job_id>', methods=['GET'])
+@bp.route('/<job_id>', methods=['GET'])
 def get_job_status(job_id):
     """Get job status and details"""
     try:
@@ -166,8 +168,11 @@ def get_job_status(job_id):
         # Calculate runtime if job has started
         runtime = None
         if job.get("started_at"):
-            start_time = datetime.fromisoformat(job["started_at"])
-            end_time = datetime.fromisoformat(job["completed_at"]) if job.get("completed_at") else datetime.utcnow()
+            start_time = datetime.fromisoformat(job["started_at"].replace('Z', '+00:00'))
+            if job.get("completed_at"):
+                end_time = datetime.fromisoformat(job["completed_at"].replace('Z', '+00:00'))
+            else:
+                end_time = datetime.utcnow().replace(tzinfo=start_time.tzinfo)
             runtime = (end_time - start_time).total_seconds()
         
         response = {
@@ -189,7 +194,7 @@ def get_job_status(job_id):
     except Exception as e:
         return jsonify({"error": f"Failed to get job: {str(e)}"}), 500
 
-@app.route('/job2', methods=['GET'])
+@bp.route('', methods=['GET'])
 def list_jobs():
     """List all jobs with optional filtering"""
     try:
@@ -212,7 +217,7 @@ def list_jobs():
     except Exception as e:
         return jsonify({"error": f"Failed to list jobs: {str(e)}"}), 500
 
-@app.route('/job2/<job_id>', methods=['DELETE'])
+@bp.route('/<job_id>', methods=['DELETE'])
 def delete_job(job_id):
     """Delete a job"""
     try:
